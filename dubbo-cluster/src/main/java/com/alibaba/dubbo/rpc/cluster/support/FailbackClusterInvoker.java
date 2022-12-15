@@ -87,6 +87,10 @@ public class FailbackClusterInvoker<T> extends AbstractClusterInvoker<T> {
         failed.put(invocation, router);
     }
 
+    /**
+     *  定时线程池会定时把ConcurrentHashMap中的失败请求拿出来重新请求，请求成功则从ConcurrentHashMap中移除。
+     * 如果请求还是失败，则异常也会被“catch”住，不会影响 ConcurrentHashMap中后面的重试。
+     */
     void retryFailed() {
         if (failed.size() == 0) {
             return;
@@ -109,6 +113,7 @@ public class FailbackClusterInvoker<T> extends AbstractClusterInvoker<T> {
         try {
             checkInvokers(invokers, invocation);
             Invoker<T> invoker = select(loadbalance, invocation, invokers, null);
+            // 远程调用。在try代码块中调用invoker#invoke方法做远程调用，“catch”到异常后直接把invocation保存到重试的ConcurrentHashMap中，并返回一个空的结果集。
             return invoker.invoke(invocation);
         } catch (Throwable e) {
             logger.error("Failback to invoke method " + invocation.getMethodName() + ", wait for retry in background. Ignored exception: "

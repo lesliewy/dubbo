@@ -76,6 +76,11 @@ public class DubboProtocol extends AbstractProtocol {
         public Object reply(ExchangeChannel channel, Object message) throws RemotingException {
             if (message instanceof Invocation) {
                 Invocation inv = (Invocation) message;
+                /**
+                 * 查找 invocation 关联的 Invoker.
+                 * 在服务暴露时服务端已经按照特定规则(端口、接口名、接口版本和接口分组)把实例Invoker存储到HashMap中，
+                 * 客户端调用过来时必须携带相同信息构造的key,找到对应Exporter然后调用。
+                 */
                 Invoker<?> invoker = getInvoker(channel, inv);
                 // need to consider backward-compatibility if it's a callback
                 if (Boolean.TRUE.toString().equals(inv.getAttachments().get(IS_CALLBACK_SERVICE_INVOKE))) {
@@ -101,6 +106,7 @@ public class DubboProtocol extends AbstractProtocol {
                     }
                 }
                 RpcContext.getContext().setRemoteAddress(channel.getRemoteAddress());
+                // 调用业务方具体方法. 主要包含实例的Filter和真实业务对象，当触发invoker#invoke方法时，就会执行具体的业务逻辑。
                 return invoker.invoke(inv);
             }
             throw new RemotingException(channel, "Unsupported request: "
@@ -192,7 +198,9 @@ public class DubboProtocol extends AbstractProtocol {
     Invoker<?> getInvoker(Channel channel, Invocation inv) throws RemotingException {
         boolean isCallBackServiceInvoke = false;
         boolean isStubServiceInvoke = false;
+        // 获取服务暴露协议的端口. 比如Dubbo协议默认的端口为20880
         int port = channel.getLocalAddress().getPort();
+        // 获取调用传递的接口. 大部分场景都是接口名.
         String path = inv.getAttachments().get(Constants.PATH_KEY);
         // if it's callback service on client side
         isStubServiceInvoke = Boolean.TRUE.toString().equals(inv.getAttachments().get(Constants.STUB_EVENT_KEY));
@@ -205,8 +213,10 @@ public class DubboProtocol extends AbstractProtocol {
             path = inv.getAttachments().get(Constants.PATH_KEY) + "." + inv.getAttachments().get(Constants.CALLBACK_SERVICE_KEY);
             inv.getAttachments().put(IS_CALLBACK_SERVICE_INVOKE, Boolean.TRUE.toString());
         }
+        // 根据端口、接口名、接口分组和接口版本构造唯一的key
         String serviceKey = serviceKey(port, path, inv.getAttachments().get(Constants.VERSION_KEY), inv.getAttachments().get(Constants.GROUP_KEY));
 
+        // 从 HashMap 中获取 Exporter
         DubboExporter<?> exporter = (DubboExporter<?>) exporterMap.get(serviceKey);
 
         if (exporter == null)
@@ -228,9 +238,13 @@ public class DubboProtocol extends AbstractProtocol {
     public <T> Exporter<T> export(Invoker<T> invoker) throws RpcException {
         URL url = invoker.getUrl();
 
+        // Dubbo高级特性: 服务分组和版本。 当客户端指定了分组和版本时，在Dubbolnvoker构造函数中会将URL中包含的接口、分组、Token和timeout加入attachment,
+        // 同时将接口上的版本号存储在version字段。当发起RPC请求时，通过DubboCodec把这些信息发送到服务器端，服务器端收到这些关键信息后重新组装成key,然后查找业务实现并调用。
+        // 根据服务分组、版本、接口和端口构造key
         // export service.
         String key = serviceKey(url);
         DubboExporter<T> exporter = new DubboExporter<T>(invoker, key, exporterMap);
+        // 把exporter存储到单例 DubboProtocol 中
         exporterMap.put(key, exporter);
 
         //export an stub service for dispatching event
@@ -248,6 +262,7 @@ public class DubboProtocol extends AbstractProtocol {
             }
         }
 
+        // 服务初次暴露会创建监听服务器. 因为同一个协议暴露有很多接口，只有初次暴露的接口才需要打开端口监听
         openServer(url);
         optimizeSerialization(url);
         return exporter;
@@ -282,6 +297,7 @@ public class DubboProtocol extends AbstractProtocol {
         url = url.addParameter(Constants.CODEC_KEY, DubboCodec.NAME);
         ExchangeServer server;
         try {
+            // 创建NettyServer并且初始化Handler
             server = Exchangers.bind(url, requestHandler);
         } catch (RemotingException e) {
             throw new RpcException("Fail to start server(url: " + url + ") " + e.getMessage(), e);
@@ -339,6 +355,9 @@ public class DubboProtocol extends AbstractProtocol {
         return invoker;
     }
 
+    /**
+     * Dubbo支持客户端是否立即和远程服务建立TCP连接是由参数是否配置了 lazy属性决定的，默认会全部连接
+     */
     private ExchangeClient[] getClients(URL url) {
         // whether to share connection
         boolean service_share_connect = false;
@@ -354,6 +373,7 @@ public class DubboProtocol extends AbstractProtocol {
             if (service_share_connect) {
                 clients[i] = getSharedClient(url);
             } else {
+                // 负责建立客户端连接和初始化Handle
                 clients[i] = initClient(url);
             }
         }
@@ -412,8 +432,11 @@ public class DubboProtocol extends AbstractProtocol {
         try {
             // connection should be lazy
             if (url.getParameter(Constants.LAZY_CONNECT_KEY, false)) {
+                // 如果配置了 lazy属性，则真实调用才会创建TCP连接
                 client = new LazyConnectExchangeClient(url, requestHandler);
             } else {
+                // 立即发起远程TCP连接，具体使用底层传输也是根据配置transporter决定的，默认是Netty传输。
+                // 会触发HeaderExchanger#connect调用，用于支持心跳和在业务线程中编解码Handler,最终会调用Transporters#connect生成Netty客户端处理。
                 client = Exchangers.connect(url, requestHandler);
             }
         } catch (RemotingException e) {

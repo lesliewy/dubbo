@@ -26,10 +26,19 @@ import com.alibaba.dubbo.rpc.RpcException;
 
 /**
  * ClassLoaderInvokerFilter
+ * 切换当前工作线程的类加载器到接口的类加载器，以便和接口的类加载器的上下文一起工作
  */
 @Activate(group = Constants.PROVIDER, order = -30000)
 public class ClassLoaderFilter implements Filter {
 
+    /**
+     * 如果要实现违反双亲委派模型来查找Class,那么通常会使用上下文类加载器(ContextClassLoader)。当前框架线程的类加载器可能
+     * 和Invoker接口的类加载器不是同一个，而当前框架线程中又需要获取Invoker的类加载器中的一些 Class,为 了避免出现 ClassNotFoundException,
+     * 此时只需要使用 Thread. currentThread().getContextClassLoader()就可以获取Invoker的类加载器，进而获得这个类加载器中的Classo
+     *
+     * 常见的使用例子有DubboProtocol#optimizeSerialization方法，会根据Invoker中配置的optimizer参数获取扩展的自定义序列化处理类，这些外部引入的序列化类在框架的类加载器
+     * 中肯定没有，因此需要使用Invoker的类加载器获取对应的类。
+     */
     @Override
     public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
         ClassLoader ocl = Thread.currentThread().getContextClassLoader();

@@ -30,10 +30,17 @@ import java.util.concurrent.Semaphore;
 
 /**
  * ThreadLimitInvokerFilter
+ * 用于限制每个服务中每个方法的最大并发数，有接口级别和方法级别的配置方式
  */
 @Activate(group = Constants.PROVIDER, value = Constants.EXECUTES_KEY)
 public class ExecuteLimitFilter implements Filter {
 
+    /**
+     * 其实现原理是：在框架中使用一个ConcurrentMap缓存了并发数的计数器。为每个请求URL生成一个IdentityString,并以此为key；
+     * 再以每个IdentityString生成一个RpcStatus对象，并以此为value。RpcStatus对象用于记录对应的并发数。
+     * 在过滤器中，会以try-catch-finally的形式调用过滤器链的下一个节点。因此，在开始调用之前，会通过URL获得RpcStatus对象，把对象中的
+     * 并发数计数器原子+1，在finally中再将原子-1。只要在计数器+1的时候，发现当前计数比设置的最大并发数大时，就会抛出异常，提示己经超过最大并发数，请求就会被终止并直接返回。
+     */
     @Override
     public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
         URL url = invoker.getUrl();

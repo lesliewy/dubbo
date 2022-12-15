@@ -432,6 +432,11 @@ public class ExtensionLoader<T> {
         }
     }
 
+    /**
+     * 为扩展点接口自动生成实现类字符串.
+     * 实现类主要包含以下逻辑：为接口中每个有Adaptive注解的方法生成默认实现(没有注解的方法则生成空实现)，每个默认实现都会从URL中提取Adaptive参数值，并
+     * 以此为依据动态加载扩展点。然后，框架会使用不同的编译器，把实现类字符串编译为自适应类并返回。
+     */
     @SuppressWarnings("unchecked")
     public T getAdaptiveExtension() {
         Object instance = cachedAdaptiveInstance.get();
@@ -482,6 +487,10 @@ public class ExtensionLoader<T> {
         return new IllegalStateException(buf.toString());
     }
 
+    /**
+     * 根据传入的name找到对应的类并通过Class.forName方法进行初始化，并为其注入依赖的其他扩展类(自动加载特性)。
+     * 当扩展类初始化后，会检查一次包装扩展类Set<Class<?>>wrapperclasses,查找包含与扩展点类型相同的构造函数，为其注入刚初始化的扩展类
+     */
     @SuppressWarnings("unchecked")
     private T createExtension(String name) {
         Class<?> clazz = getExtensionClasses().get(name);
@@ -494,10 +503,13 @@ public class ExtensionLoader<T> {
                 EXTENSION_INSTANCES.putIfAbsent(clazz, clazz.newInstance());
                 instance = (T) EXTENSION_INSTANCES.get(clazz);
             }
+            // 向扩展类注入其依赖的属性，如扩展类A又依赖了扩展类B
             injectExtension(instance);
+            // 遍历扩展点包装类，用于初始化包装类实例
             Set<Class<?>> wrapperClasses = cachedWrapperClasses;
             if (wrapperClasses != null && !wrapperClasses.isEmpty()) {
                 for (Class<?> wrapperClass : wrapperClasses) {
+                    // 找到构造方法参数类型为type (扩展类的类型)的包装类，为其注入扩展类实例
                     instance = injectExtension((T) wrapperClass.getConstructor(type).newInstance(instance));
                 }
             }
@@ -508,10 +520,15 @@ public class ExtensionLoader<T> {
         }
     }
 
+    /**
+     * 总体实现了类似Spring的IoC机制，其实现原理比较简单：首先通过反射获取类的所有方法，然后遍历以字符串set开头的方法，得到set方法的参数类型，再通
+     * 过ExtensionFactory寻找参数类型相同的扩展类实例，如果找到，就设值进去
+     */
     private T injectExtension(T instance) {
         try {
             if (objectFactory != null) {
                 for (Method method : instance.getClass().getMethods()) {
+                    // 找到以 set 开头的方法。 要求只有一个参数， 并且是 public 方法
                     if (method.getName().startsWith("set")
                             && method.getParameterTypes().length == 1
                             && Modifier.isPublic(method.getModifiers())) {
@@ -521,11 +538,15 @@ public class ExtensionLoader<T> {
                         if (method.getAnnotation(DisableInject.class) != null) {
                             continue;
                         }
+                        // 得到参数的类型
                         Class<?> pt = method.getParameterTypes()[0];
                         try {
+                            //  通过字符串截取，获得小写开头的类名。如 I setTestService,截取 testService
                             String property = method.getName().length() > 3 ? method.getName().substring(3, 4).toLowerCase() + method.getName().substring(4) : "";
+                            // 通过 ExtensionFactory 获取实例
                             Object object = objectFactory.getExtension(pt, property);
                             if (object != null) {
+                                // 如果获取了这个扩展类实现，则调用set方法，把实例注入进去
                                 method.invoke(instance, object);
                             }
                         } catch (Exception e) {
@@ -553,6 +574,7 @@ public class ExtensionLoader<T> {
     }
 
     private Map<String, Class<?>> getExtensionClasses() {
+        // 先尝试从缓存中获取classes,没有则调用
         Map<String, Class<?>> classes = cachedClasses.get();
         if (classes == null) {
             synchronized (cachedClasses) {
@@ -566,8 +588,12 @@ public class ExtensionLoader<T> {
         return classes;
     }
 
+    /**
+     * 开始加载Class
+     */
     // synchronized in getExtensionClasses
     private Map<String, Class<?>> loadExtensionClasses() {
+        // 检查是否有SPI注解。如果有，则获取注解中填写的名称，并缓存为默认实现名。 1 I如@SPI("impl")会保存impl为默认实现
         final SPI defaultAnnotation = type.getAnnotation(SPI.class);
         if (defaultAnnotation != null) {
             String value = defaultAnnotation.value();
@@ -581,6 +607,7 @@ public class ExtensionLoader<T> {
             }
         }
 
+        // 加载路径下面的SPI配置文件
         Map<String, Class<?>> extensionClasses = new HashMap<String, Class<?>>();
         loadDirectory(extensionClasses, DUBBO_INTERNAL_DIRECTORY);
         loadDirectory(extensionClasses, DUBBO_DIRECTORY);
@@ -645,13 +672,16 @@ public class ExtensionLoader<T> {
         }
     }
 
+    /**
+     * 根据Class 的注解来判断扩展点类型，再根据类型分类做缓存
+     */
     private void loadClass(Map<String, Class<?>> extensionClasses, java.net.URL resourceURL, Class<?> clazz, String name) throws NoSuchMethodException {
         if (!type.isAssignableFrom(clazz)) {
             throw new IllegalStateException("Error when load extension class(interface: " +
                     type + ", class line: " + clazz.getName() + "), class "
                     + clazz.getName() + "is not subtype of interface.");
         }
-        if (clazz.isAnnotationPresent(Adaptive.class)) {
+        if (clazz.isAnnotationPresent(Adaptive.class)) {  // 如果是自适应类(Adaptive )则缓存,缓存的自适应类只能有一个
             if (cachedAdaptiveClass == null) {
                 cachedAdaptiveClass = clazz;
             } else if (!cachedAdaptiveClass.equals(clazz)) {
@@ -659,7 +689,7 @@ public class ExtensionLoader<T> {
                         + cachedAdaptiveClass.getClass().getName()
                         + ", " + clazz.getClass().getName());
             }
-        } else if (isWrapperClass(clazz)) {
+        } else if (isWrapperClass(clazz)) {   // 如果是包装扩展类(Wrapper ),则直接加入包装扩展类的Set集合
             Set<Class<?>> wrappers = cachedWrapperClasses;
             if (wrappers == null) {
                 cachedWrapperClasses = new ConcurrentHashSet<Class<?>>();
@@ -676,10 +706,12 @@ public class ExtensionLoader<T> {
             }
             String[] names = NAME_SEPARATOR.split(name);
             if (names != null && names.length > 0) {
+                // 如果有自动激活注解(Activate ), 则缓存到自动激活的缓存中
                 Activate activate = clazz.getAnnotation(Activate.class);
                 if (activate != null) {
                     cachedActivates.put(names[0], activate);
                 }
+                // 不是自适应类型，也不是包装类型，剩下的就是普通扩展类了，也会缓存起来注意：自动激活也是普通扩展类的一种，只是会根据不同条件同时激活罢了
                 for (String n : names) {
                     if (!cachedNames.containsKey(clazz)) {
                         cachedNames.put(clazz, n);

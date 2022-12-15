@@ -54,6 +54,9 @@ public class ForkingClusterInvoker<T> extends AbstractClusterInvoker<T> {
         super(directory);
     }
 
+    /**
+     * Forking可以同时并行请求多个服务，有任何一个返回，则直接返回。相对于其他调用策略，Forking的实现是最复杂的。
+     */
     @Override
     @SuppressWarnings({"unchecked", "rawtypes"})
     public Result doInvoke(final Invocation invocation, List<Invoker<T>> invokers, LoadBalance loadbalance) throws RpcException {
@@ -62,6 +65,10 @@ public class ForkingClusterInvoker<T> extends AbstractClusterInvoker<T> {
             final List<Invoker<T>> selected;
             final int forks = getUrl().getParameter(Constants.FORKS_KEY, Constants.DEFAULT_FORKS);
             final int timeout = getUrl().getParameter(Constants.TIMEOUT_KEY, Constants.DEFAULT_TIMEOUT);
+            // 获取最终要调用的Invoker列表。
+            // 假设用户设置最大的并行数为n, 实际可以调用的最大服务数为V。
+            // 如果n < 0或n > v,则说明可用的服务数小于用户的设置，因此最终要调用的Invoker 只能有v个；
+            // 如果 n<v,则会循环调用负载均衡方法，不断得到可调用的Invoker,加入Invoker集合里。
             if (forks <= 0 || forks >= invokers.size()) {
                 selected = invokers;
             } else {
@@ -77,6 +84,8 @@ public class ForkingClusterInvoker<T> extends AbstractClusterInvoker<T> {
             RpcContext.getContext().setInvokers((List) selected);
             final AtomicInteger count = new AtomicInteger();
             final BlockingQueue<Object> ref = new LinkedBlockingQueue<Object>();
+            // 执行调用。循环使用线程池并行调用，调用成功，则把结果加入阻塞队列；调用失败， 则失败计数+1。
+            // 如果所有线程的调用都失败了，即失败计数>=所有可调用的Invoker时，则把异常信息加入阻塞队列。
             for (final Invoker<T> invoker : selected) {
                 executor.execute(new Runnable() {
                     @Override
@@ -85,6 +94,7 @@ public class ForkingClusterInvoker<T> extends AbstractClusterInvoker<T> {
                             Result result = invoker.invoke(invocation);
                             ref.offer(result);
                         } catch (Throwable e) {
+                            // 只有当最后一个Invoker也调用失败时才会把异常信息保存到阻塞队列， 从而达到全部失败才返回异常的效果。
                             int value = count.incrementAndGet();
                             if (value >= selected.size()) {
                                 ref.offer(e);
@@ -94,6 +104,7 @@ public class ForkingClusterInvoker<T> extends AbstractClusterInvoker<T> {
                 });
             }
             try {
+                // 同步等待结果, 如果是正常结果则返回，如果是异常则抛出。
                 Object ret = ref.poll(timeout, TimeUnit.MILLISECONDS);
                 if (ret instanceof Throwable) {
                     Throwable e = (Throwable) ret;

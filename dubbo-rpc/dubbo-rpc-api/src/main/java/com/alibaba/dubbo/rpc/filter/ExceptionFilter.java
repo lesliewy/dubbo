@@ -56,6 +56,10 @@ public class ExceptionFilter implements Filter {
         this.logger = logger;
     }
 
+    /**
+     * 关注点不在于捕获异常，而是为了找到那些返回的自定义异常，但异常类可能不存在于消费
+     * 者端，从而防止消费者端序列化失败。对于所有没有声明Unchecked的方法抛出的异常， ExceptionFilter会把未引入的异常包装到RuntimeException中，并把异常原因字符串化后返回
+     */
     @Override
     public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
         try {

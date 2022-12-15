@@ -92,6 +92,7 @@ public class AccessLogFilter implements Filter {
 
     private void log(String accesslog, String logmessage) {
         init();
+        // 首先由于Set集合是无序的，因此日志输出到文件也是无序的；
         Set<String> logSet = logQueue.get(accesslog);
         if (logSet == null) {
             logQueue.putIfAbsent(accesslog, new ConcurrentHashSet<String>());
@@ -107,10 +108,16 @@ public class AccessLogFilter implements Filter {
         try {
             String accesslog = invoker.getUrl().getParameter(Constants.ACCESS_LOG_KEY);
             if (ConfigUtils.isNotEmpty(accesslog)) {
+                //  获取参数。获取上下文、接口名、版本、分组信息等参数，用于日志的构建
                 RpcContext context = RpcContext.getContext();
                 String serviceName = invoker.getInterface().getName();
                 String version = invoker.getUrl().getParameter(Constants.VERSION_KEY);
                 String group = invoker.getUrl().getParameter(Constants.GROUP_KEY);
+                /**
+                 * 构建日志字符串。根据步骤（1 中的数据开始组装日志，最终会得到一个日志字符串，类似于
+                 * [2019-01-15 20:13:58] 192.168.1.17:20881 -> 192.168.1.17:20882 - com.test.demo.Demo
+                 * Service testFunction java.lang.String [null]
+                 */
                 StringBuilder sn = new StringBuilder();
                 sn.append("[").append(new SimpleDateFormat(MESSAGE_DATE_FORMAT).format(new Date())).append("] ").append(context.getRemoteHost()).append(":").append(context.getRemotePort())
                         .append(" -> ").append(context.getLocalHost()).append(":").append(context.getLocalPort())
@@ -143,6 +150,12 @@ public class AccessLogFilter implements Filter {
                     sn.append(JSON.toJSONString(args));
                 }
                 String msg = sn.toString();
+                /**
+                 * 如果用户配置了使用应用本身的日志组件，则直接通过封装的LoggerFactory打印日志；
+                 * 如果用户配置了日志要输出到自定义的文件中，则会把日志加入一个 ConcurrentMap<String, ConcurrentHashSet<String>>中暂存，
+                 * key 是自定义的 accesslog 值 （如accesslogicustom-access.log”），value就是对应的日志集合。后续等待定时线程不断遍历
+                 * 整个Map,把日志写入对应的文件。
+                 */
                 if (ConfigUtils.isDefault(accesslog)) {
                     LoggerFactory.getLogger(ACCESS_LOG_KEY + "." + invoker.getInterface().getName()).info(msg);
                 } else {

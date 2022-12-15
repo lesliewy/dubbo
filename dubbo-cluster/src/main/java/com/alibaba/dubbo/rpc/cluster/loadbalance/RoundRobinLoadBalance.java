@@ -33,7 +33,14 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Round robin load balance.
  * 
- * Smoothly round robin's implementation @since 2.6.5 
+ * Smoothly round robin's implementation @since 2.6.5
+ *
+ * 权重轮询又分为普通权重轮询和平滑权重轮询。
+ * 普通权重轮询会造成某个节点会突然被频繁选中，这样很容易突然让一个节点流量暴增。
+ * Nginx中有一种叫平滑轮询的算法(smooth weighted round-robin balancing),
+ * 这种算法在轮询时会穿插选择其他节点，让整个服务器选择的过程比较均匀，不会
+ * “逮住”一个节点一直调用.
+ * Dubbo框架中最新的RoundRobin代码已经改为平滑权重轮询算法。
  */
 public class RoundRobinLoadBalance extends AbstractLoadBalance {
     public static final String NAME = "roundrobin";
@@ -42,7 +49,10 @@ public class RoundRobinLoadBalance extends AbstractLoadBalance {
     
     protected static class WeightedRoundRobin {
         private int weight;
+        // 考虑到并发场景下某个Invoker会被同时选中，表示该节点被所有线程选中的权重总和
+        //例如：某节点权重是1。。，被4个线程同时选中，则变为40。
         private AtomicLong current = new AtomicLong(0);
+        // 最后一次更新的时间，用于后续缓存超时的判断
         private long lastUpdate;
         public int getWeight() {
             return weight;
@@ -89,6 +99,10 @@ public class RoundRobinLoadBalance extends AbstractLoadBalance {
     @Override
     protected <T> Invoker<T> doSelect(List<Invoker<T>> invokers, URL url, Invocation invocation) {
         String key = invokers.get(0).getUrl().getServiceKey() + "." + invocation.getMethodName();
+        // 初始化权重缓存Map.
+        // 以每个Invoker的URL为key,对象WeightedRoundRobin为value生成一个 ConcurrentMap, 并把这个 Map 保存到全局的 methodWeightMap 中：
+        // ConcurrentMap〈String, ConcurrentMap<StringJ WeightedRoundRobin>> methodWeightMap。
+        // methodWeightMap的key是每个接口+方法名。这一步只会生成这个缓存Map,但里面是空的，第2步才会生成每个Invoker对应的键值。
         ConcurrentMap<String, WeightedRoundRobin> map = methodWeightMap.get(key);
         if (map == null) {
             methodWeightMap.putIfAbsent(key, new ConcurrentHashMap<String, WeightedRoundRobin>());
@@ -99,6 +113,12 @@ public class RoundRobinLoadBalance extends AbstractLoadBalance {
         long now = System.currentTimeMillis();
         Invoker<T> selectedInvoker = null;
         WeightedRoundRobin selectedWRR = null;
+        // 遍历所有Invoker。
+        // 首先，在遍历的过程中把每个Invoker的数据填充到第1步生成的权重缓存Map中。其次，获取每个Invoker的预热权重，
+        // 新版的框架RoundRobin也支持预热， 通过和Random负载均衡中相同的方式获得预热阶段的权重。如果预热权重和Invoker设置的权
+        //重不相等，则说明还在预热阶段，此时会以预热权重为准。然后，进行平滑轮询。每个Invoker
+        //会把权重加到自己的current属性上，并更新当前Invoker的lastUpdate。同时累加每个Invoker
+        //的权重到totalweight.最终，遍历完后，选出所有Invoker中current最大的作为最终要调用的节点。
         for (Invoker<T> invoker : invokers) {
             String identifyString = invoker.getUrl().toIdentityString();
             WeightedRoundRobin weightedRoundRobin = map.get(identifyString);
@@ -125,6 +145,7 @@ public class RoundRobinLoadBalance extends AbstractLoadBalance {
             }
             totalWeight += weight;
         }
+        // 清除已经没有使用的缓存节点。
         if (!updateLock.get() && invokers.size() != map.size()) {
             if (updateLock.compareAndSet(false, true)) {
                 try {
@@ -144,6 +165,7 @@ public class RoundRobinLoadBalance extends AbstractLoadBalance {
                 }
             }
         }
+        // 返回Invoker。注意，返回之前会把当前Invoker的current减去总权重。这是平滑权重轮询中重要的一步。
         if (selectedInvoker != null) {
             selectedWRR.sel(totalWeight);
             return selectedInvoker;

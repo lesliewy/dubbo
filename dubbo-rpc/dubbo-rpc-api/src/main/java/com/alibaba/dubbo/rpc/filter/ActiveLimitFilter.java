@@ -28,6 +28,7 @@ import com.alibaba.dubbo.rpc.RpcStatus;
 
 /**
  * LimitInvokerFilter
+ * 和服务提供者端的ExecuteLimitFilter相似，ActiveLimitFilter是消费者端的过滤器，限制的是客户端的并发数
  */
 @Activate(group = Constants.CONSUMER, value = Constants.ACTIVES_KEY)
 public class ActiveLimitFilter implements Filter {

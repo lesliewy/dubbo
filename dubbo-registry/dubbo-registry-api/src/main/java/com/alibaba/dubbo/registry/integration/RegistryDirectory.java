@@ -192,6 +192,9 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
         }
     }
 
+    /**
+     * 监听到配置中心对应的URL的变化，然后更新本地的配置参数。监听的URL分为三类：配置configurators,路由规则router, Invoker列表。
+     */
     @Override
     public synchronized void notify(List<URL> urls) {
         List<URL> invokerUrls = new ArrayList<URL>();
@@ -212,10 +215,13 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
                 logger.warn("Unsupported category " + category + " in notified url: " + url + " from registry " + getUrl().getAddress() + " to consumer " + NetUtils.getLocalHost());
             }
         }
+        // 管理员可以在dubbo-admin动态配置功能上修改生产者的参数，这些参数会保存在配置中心的configurators类目下。
+        // notify监听到URL配置参数的变化，会解析并更新本地的Configurator配置。
         // configurators
         if (configuratorUrls != null && !configuratorUrls.isEmpty()) {
             this.configurators = toConfigurators(configuratorUrls);
         }
+        // 通过Router工厂把每个URL包装成路由规则，最后更新本地的路由信息。这个过程会忽略以empty开头的URL
         // routers
         if (routerUrls != null && !routerUrls.isEmpty()) {
             List<Router> routers = toRouters(routerUrls);
@@ -231,6 +237,9 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
                 this.overrideDirectoryUrl = configurator.configure(overrideDirectoryUrl);
             }
         }
+        // 如果是empty协议的URL,则会禁用该服务，并销毁本地缓存的Invoker；
+        // 如果监听到的Invoker类型URL都是空的，则说明没有更新，直接使用本地的老缓存；
+        // 如果监听到的Invoker类型URL不为空，则把新的URL和本地老的URL合并，创建新的Invoker,找出差异的老Invoker并销毁。
         // providers
         refreshInvoker(invokerUrls);
     }
@@ -342,6 +351,7 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
     }
 
     /**
+     * 创建invoker
      * Turn urls into invokers, and if url has been refer, will not re-reference.
      *
      * @param urls
@@ -359,6 +369,7 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
             if (queryProtocols != null && queryProtocols.length() > 0) {
                 boolean accept = false;
                 String[] acceptProtocols = queryProtocols.split(",");
+                // Dubbo框架允许在消费方配置只消费指定协议的服务, 根据消费方protocol配置过滤不匹配协议。也支持多个协议，多个协议用","分隔.
                 for (String acceptProtocol : acceptProtocols) {
                     if (providerUrl.getProtocol().equals(acceptProtocol)) {
                         accept = true;
@@ -377,8 +388,10 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
                         + ", supported protocol: " + ExtensionLoader.getExtensionLoader(Protocol.class).getSupportedExtensions()));
                 continue;
             }
+            // 合并provider端配置数据,比如服务端IP和port等, 解耦了消费方强绑定配置
             URL url = mergeUrl(providerUrl);
 
+            // 忽略重复推送的服务列表
             String key = url.toFullString(); // The parameter urls are sorted
             if (keys.contains(key)) { // Repeated url
                 continue;
@@ -396,6 +409,8 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
                         enabled = url.getParameter(Constants.ENABLED_KEY, true);
                     }
                     if (enabled) {
+                        // 使用具体协议创建远程连接.
+                        // 远程连接建立后也会发起拦截器构建操作, 在ProtocolFilterWrapper
                         invoker = new InvokerDelegate<T>(protocol.refer(serviceType, url), url, providerUrl);
                     }
                 } catch (Throwable t) {
@@ -581,6 +596,11 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
         }
     }
 
+    /**
+     * notify中更新的Invoker列表最终会转化为一个字典Map<Stringj List<Invoker<T>>> methodlnvokerMapo
+     * key是对应的方法名称，value是整个Invoker列表。
+     * doList的最终目标就是在字典里匹配出可以调用的Invoker列表，并返回给上层。
+     */
     @Override
     public List<Invoker<T>> doList(Invocation invocation) {
         if (forbidden) {
@@ -594,16 +614,20 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
         if (localMethodInvokerMap != null && localMethodInvokerMap.size() > 0) {
             String methodName = RpcUtils.getMethodName(invocation);
             Object[] args = RpcUtils.getArguments(invocation);
+            // 根据方法名和首参数匹配Invokero
             if (args != null && args.length > 0 && args[0] != null
                     && (args[0] instanceof String || args[0].getClass().isEnum())) {
                 invokers = localMethodInvokerMap.get(methodName + "." + args[0]); // The routing can be enumerated according to the first parameter
             }
+            // 根据方法名匹配Invoker, 以方法名为key去methodlnvokerMap中匹配Invoker列表.
             if (invokers == null) {
                 invokers = localMethodInvokerMap.get(methodName);
             }
+            // 根据"*”匹配Invoker, 用星号去匹配Invoker列表
             if (invokers == null) {
                 invokers = localMethodInvokerMap.get(Constants.ANY_VALUE);
             }
+            // 遍历methodlnvokerMap,找到第一个Invoker列表返回。
             if (invokers == null) {
                 Iterator<List<Invoker<T>>> iterator = localMethodInvokerMap.values().iterator();
                 if (iterator.hasNext()) {
@@ -611,6 +635,7 @@ public class RegistryDirectory<T> extends AbstractDirectory<T> implements Notify
                 }
             }
         }
+        // 如果还没有，则返回一个空列表。
         return invokers == null ? new ArrayList<Invoker<T>>(0) : invokers;
     }
 

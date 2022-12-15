@@ -38,6 +38,7 @@ import java.util.concurrent.Future;
 
 /**
  * EventFilter
+ * FutureFilter主要实现框架在调用前后出现异常时，触发调用用户配置的回调方法，
  */
 @Activate(group = Constants.CONSUMER)
 public class FutureFilter implements Filter {

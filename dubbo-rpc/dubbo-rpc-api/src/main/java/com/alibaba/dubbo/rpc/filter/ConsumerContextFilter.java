@@ -30,6 +30,8 @@ import com.alibaba.dubbo.rpc.RpcResult;
 
 /**
  * ConsumerContextInvokerFilter
+ * ConsumerContextFilter会和ContextFilter配合使用。因为在微服务环境中，有很多链式调用， 如A-B-C-D。收到请求时，当前节点可以被看作一个服务提供者，由ContextFilter设置上
+ * 下文。当发起请求到下一个服务时，当前服务变为一个消费者，由ConsumerContextFilter设置上下文。
  */
 @Activate(group = Constants.CONSUMER, order = -10000)
 public class ConsumerContextFilter implements Filter {

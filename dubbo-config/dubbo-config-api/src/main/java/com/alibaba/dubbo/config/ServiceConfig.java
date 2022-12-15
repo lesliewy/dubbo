@@ -357,7 +357,11 @@ public class ServiceConfig<T> extends AbstractServiceConfig {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private void doExportUrls() {
+        // Dubbo支持多注册中心同时写，如果配置了服务同时注册多个注册中心，则会在 ServiceConfig#doExportUrls中依次暴露
+        // 有注册中心: registry://host:port/com.alibaba.dubbo.registry.RegistryService?protocol=zookeeper&export=dubbo://ip:port/xxx?..。
+        // 无注册中心url: dubbo://ip:host/xxx.Service?timeout=1000&..。
         List<URL> registryURLs = loadRegistries(true);
+        // Dubbo也支持相同服务暴露多个协议，比如同时暴露Dubbo和REST协议
         for (ProtocolConfig protocolConfig : protocols) {
             doExportUrlsFor1Protocol(protocolConfig, registryURLs);
         }
@@ -369,6 +373,7 @@ public class ServiceConfig<T> extends AbstractServiceConfig {
             name = "dubbo";
         }
 
+
         Map<String, String> map = new HashMap<String, String>();
         map.put(Constants.SIDE_KEY, Constants.PROVIDER_SIDE);
         map.put(Constants.DUBBO_VERSION_KEY, Version.getProtocolVersion());
@@ -376,8 +381,10 @@ public class ServiceConfig<T> extends AbstractServiceConfig {
         if (ConfigUtils.getPid() > 0) {
             map.put(Constants.PID_KEY, String.valueOf(ConfigUtils.getPid()));
         }
+        //通过反射获取配置对象并放到map中用于后续构造URL参数.
         appendParameters(map, application);
         appendParameters(map, module);
+        // 区分全局配置，默认在属性前面增加default.前缀，当框架获取URL,中的参数时，如果不存在则会自动尝试获取default.前缀对应的值
         appendParameters(map, provider, Constants.DEFAULT_KEY);
         appendParameters(map, protocolConfig);
         appendParameters(map, this);
@@ -473,6 +480,7 @@ public class ServiceConfig<T> extends AbstractServiceConfig {
 
         String host = this.findConfigedHosts(protocolConfig, registryURLs, map);
         Integer port = this.findConfigedPorts(protocolConfig, name, map);
+        // dubbo://192.168.245.1:20880/cn.wy.test1.api.TestService?anyhost=true&application=test1-provider&bean.name=cn.wy.test1.api.TestService&bind.ip=192.168.245.1&bind.port=20880&dubbo=2.0.2&generic=false&interface=cn.wy.test1.api.TestService&methods=sayHello&pid=26391&side=provider&timestamp=1667131526759
         URL url = new URL(name, host, port, (contextPath == null || contextPath.length() == 0 ? "" : contextPath + "/") + path, map);
 
         if (ExtensionLoader.getExtensionLoader(ConfiguratorFactory.class)
@@ -511,9 +519,15 @@ public class ServiceConfig<T> extends AbstractServiceConfig {
                             registryURL = registryURL.addParameter(Constants.PROXY_KEY, proxy);
                         }
 
+                        // 通过动态代理的方式创建Invoker对象，在服务端生成的是AbstractProxylnvoker实例，所有真实的方法调用都会委托给代理，然后代理转发给服务ref 调用
                         Invoker<?> invoker = proxyFactory.getInvoker(ref, (Class) interfaceClass, registryURL.addParameterAndEncoded(Constants.EXPORT_KEY, url.toFullString()));
                         DelegateProviderMetaDataInvoker wrapperInvoker = new DelegateProviderMetaDataInvoker(invoker, this);
 
+                        /**
+                         * protocol实例会自动根据服务暴露URL自动做适配，有注册中心场景会取出具体协议，比 如ZooKeeper,首先会创建注册中心实例，然后取出export对应的具体服务URL,最后用服务
+                         * URL对应的协议(默认为Dubbo)进行服务暴露，当服务暴露成功后把服务数据注册到ZooKeeper
+                         * ProtocolFilterWrapper
+                         */
                         Exporter<?> exporter = protocol.export(wrapperInvoker);
                         exporters.add(exporter);
                     }
@@ -521,6 +535,7 @@ public class ServiceConfig<T> extends AbstractServiceConfig {
                     Invoker<?> invoker = proxyFactory.getInvoker(ref, (Class) interfaceClass, url);
                     DelegateProviderMetaDataInvoker wrapperInvoker = new DelegateProviderMetaDataInvoker(invoker, this);
 
+                    // 处理没有使用注册中心的场景，直接进行服务暴露，不需要元数据
                     Exporter<?> exporter = protocol.export(wrapperInvoker);
                     exporters.add(exporter);
                 }
@@ -532,11 +547,13 @@ public class ServiceConfig<T> extends AbstractServiceConfig {
     @SuppressWarnings({"unchecked", "rawtypes"})
     private void exportLocal(URL url) {
         if (!Constants.LOCAL_PROTOCOL.equalsIgnoreCase(url.getProtocol())) {
+            // injvm://127.0.0.1/cn.wy.test1.api.TestService?anyhost=true&application=test1-provider&bean.name=cn.wy.test1.api.TestService&bind.ip=192.168.245.1&bind.port=20880&dubbo=2.0.2&generic=false&interface=cn.wy.test1.api.TestService&methods=sayHello&pid=26391&side=provider&timestamp=1667131526759
             URL local = URL.valueOf(url.toFullString())
-                    .setProtocol(Constants.LOCAL_PROTOCOL)
+                    .setProtocol(Constants.LOCAL_PROTOCOL)    // 显式指定injvm协议进行暴露。 这个协议比较特殊，不会做端口打开操作，仅仅把服务保存在内存中而已
                     .setHost(LOCALHOST)
                     .setPort(0);
             StaticContext.getContext(Constants.SERVICE_IMPL_CLASS).put(url.getServiceKey(), getServiceClass(ref));
+            // 调用 InjvmProtocol#export
             Exporter<?> exporter = protocol.export(
                     proxyFactory.getInvoker(ref, (Class) interfaceClass, local));
             exporters.add(exporter);

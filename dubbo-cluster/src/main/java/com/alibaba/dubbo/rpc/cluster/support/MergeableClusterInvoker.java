@@ -122,10 +122,12 @@ public class MergeableClusterInvoker<T> implements Invoker<T> {
             return new RpcResult((Object) null);
         }
 
+        // 如果配置的merger类似 .addAll
         if (merger.startsWith(".")) {
             merger = merger.substring(1);
             Method method;
             try {
+                // 获取真正的方法.
                 method = returnType.getMethod(merger, returnType);
             } catch (NoSuchMethodException e) {
                 throw new RpcException("Can not merge result because missing method [ " + merger + " ] in class [ " + 

@@ -67,6 +67,10 @@ public abstract class AbstractDirectory<T> implements Directory<T> {
         setRouters(routers);
     }
 
+    /**
+     * 调用抽象方法doList获取所有Invoker列表，不同子类有不同的实现；
+     * 遍历所有的router,进行Invoker的过滤，最后返回过滤好的Invoker列表。
+     */
     @Override
     public List<Invoker<T>> list(Invocation invocation) throws RpcException {
         if (destroyed) {

@@ -14,31 +14,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alibaba.dubbo.rpc.cluster;
+package cn.wy.test1.impl;
 
-import com.alibaba.dubbo.common.URL;
-import com.alibaba.dubbo.common.extension.Adaptive;
-import com.alibaba.dubbo.common.extension.SPI;
+import cn.wy.test1.api.TestService;
+import com.alibaba.dubbo.rpc.RpcContext;
 
-/**
- * RouterFactory. (SPI, Singleton, ThreadSafe)
- * <p>
- * <a href="http://en.wikipedia.org/wiki/Routing">Routing</a>
- *
- * @see Cluster#join(Directory)
- * @see Directory#list(com.alibaba.dubbo.rpc.Invocation)
- */
-// RouterFactory是一个SPI接口，没有设置默认值，但由于有@Adaptive("protocol")注解， 因此它会根据URL中的protocol参数确定要初始化哪一个具体的Router实现。
-@SPI
-public interface RouterFactory {
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
-    /**
-     * Create router.
-     *
-     * @param url
-     * @return router
-     */
-    @Adaptive("protocol")
-    Router getRouter(URL url);
+public class TestServiceImpl implements TestService {
+
+    @Override
+    public String sayHello(String name) {
+        System.out.println("[" + new SimpleDateFormat("HH:mm:ss").format(new Date()) + "] Hello " + name + ", request from consumer: " + RpcContext.getContext().getRemoteAddress());
+        return "Hello " + name + ", response from provider: " + RpcContext.getContext().getLocalAddress();
+    }
 
 }

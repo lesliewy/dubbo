@@ -40,6 +40,9 @@ public class BroadcastClusterInvoker<T> extends AbstractClusterInvoker<T> {
         super(directory);
     }
 
+    /**
+     * Broadcast会广播给所有可用的节点，如果任何一个节点报错，则返回异常
+     */
     @Override
     @SuppressWarnings({"unchecked", "rawtypes"})
     public Result doInvoke(final Invocation invocation, List<Invoker<T>> invokers, LoadBalance loadbalance) throws RpcException {
@@ -47,6 +50,8 @@ public class BroadcastClusterInvoker<T> extends AbstractClusterInvoker<T> {
         RpcContext.getContext().setInvokers((List) invokers);
         RpcException exception = null;
         Result result = null;
+        // 循环遍历所有Invoker,直接做RPC调用。任何一个节点调用出错，并不会中断整个广播过程，会先记录异常，在最后广播完成后再抛出。
+        // 如果多个节点异常，则只有最后一个节点的异常会被抛出，前面的异常会被覆盖。
         for (Invoker<T> invoker : invokers) {
             try {
                 result = invoker.invoke(invocation);

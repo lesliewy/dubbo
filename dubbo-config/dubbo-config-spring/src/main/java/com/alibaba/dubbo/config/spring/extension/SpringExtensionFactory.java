@@ -38,10 +38,17 @@ import java.util.Set;
 public class SpringExtensionFactory implements ExtensionFactory {
     private static final Logger logger = LoggerFactory.getLogger(SpringExtensionFactory.class);
 
+    // 用能自动去重的 Set 保存 Spring 上下文
     private static final Set<ApplicationContext> contexts = new ConcurrentHashSet<ApplicationContext>();
 
     private static final ApplicationListener shutdownHookListener = new ShutdownHookListener();
 
+    /**
+     * Spring的上下文引用会在这里被保存.
+     * 在ReferenceBean和ServiceBean中会调用静态方法保存Spring上下文，即一个服务被发布或被
+     * 引用的时候，对应的Spring上下文会被保存下来。
+     * @param context
+     */
     public static void addApplicationContext(ApplicationContext context) {
         contexts.add(context);
         BeanFactoryUtils.addApplicationListener(context, shutdownHookListener);
@@ -63,6 +70,7 @@ public class SpringExtensionFactory implements ExtensionFactory {
     @Override
     @SuppressWarnings("unchecked")
     public <T> T getExtension(Class<T> type, String name) {
+        // 遍历所有Spring下文，先根据名字从Spring容器中查找
         for (ApplicationContext context : contexts) {
             if (context.containsBean(name)) {
                 Object bean = context.getBean(name);
@@ -78,6 +86,7 @@ public class SpringExtensionFactory implements ExtensionFactory {
             return null;
         }
 
+        // 如果根据名字没找到,则直接通过类型查找
         for (ApplicationContext context : contexts) {
             try {
                 return context.getBean(type);
@@ -92,6 +101,7 @@ public class SpringExtensionFactory implements ExtensionFactory {
 
         logger.warn("No spring extension (bean) named:" + name + ", type:" + type.getName() + " found, stop get bean.");
 
+        // 根据类型也找不到，只能返回null 了
         return null;
     }
 

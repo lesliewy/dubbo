@@ -51,6 +51,10 @@ import java.lang.annotation.Target;
  * instead of reporting which extract extension implementation fails and the extract reason.
  * </p>
  */
+
+/**
+ * 标记这个接口是一个Dubbo SPI接口，即是一个扩展点，可以有多个不同的内置或用户定义的实现。运行时需要通过配置找到具体的实现类。
+ */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ElementType.TYPE})
@@ -58,6 +62,7 @@ public @interface SPI {
 
     /**
      * default extension name
+     * 通过这个属性，我们可以传入不同的参数来设置这个接口的默认实现类
      */
     String value() default "";
 

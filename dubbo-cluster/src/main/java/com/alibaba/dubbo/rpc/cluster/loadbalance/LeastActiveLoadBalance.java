@@ -26,6 +26,11 @@ import java.util.Random;
 
 /**
  * LeastActiveLoadBalance
+ * 即框架会记下每个Invoker的活跃数， 每次只从活跃数最少的Invoker里选一个节点。这个负载均衡算法需要配合ActiveLimitFilter
+ * 过滤器来计算每个接口方法的活跃数。
+ *
+ * 在ActiveLimitFilter中，只要进来一个请求，该方法的调用的计数就会原子性+1。整个Invoker调用过程会包在try-catch-finally中，
+ * 无论调用结束或出现异常，finally中都会把计数原子-1。该原子计数就是最少活跃数。
  *
  */
 public class LeastActiveLoadBalance extends AbstractLoadBalance {
@@ -43,10 +48,13 @@ public class LeastActiveLoadBalance extends AbstractLoadBalance {
         int totalWeight = 0; // The sum of with warmup weights
         int firstWeight = 0; // Initial value, used for comparision
         boolean sameWeight = true; // Every invoker has the same weight value?
+        // 初始化各种计数器，如最小活跃数计数器、总权重计数器等
         for (int i = 0; i < length; i++) {
+            // 获得Invoker的活跃数、预热权重
             Invoker<T> invoker = invokers.get(i);
             int active = RpcStatus.getStatus(invoker.getUrl(), invocation.getMethodName()).getActive(); // Active number
             int afterWarmup = getWeight(invoker, invocation); // Weight
+            // 第一次，或者发现有更小的活跃数
             if (leastActive == -1 || active < leastActive) { // Restart, when find a invoker having smaller least active value.
                 leastActive = active; // Record the current least active value
                 leastCount = 1; // Reset leastCount, count again based on current leastCount
@@ -69,6 +77,7 @@ public class LeastActiveLoadBalance extends AbstractLoadBalance {
             // If we got exactly one invoker having the least active value, return this invoker directly.
             return invokers.get(leastIndexs[0]);
         }
+        // 如果权重不一样，则使用和Random负载均衡一样的权重算法找到一个Invoker并返回
         if (!sameWeight && totalWeight > 0) {
             // If (not every invoker has the same weight & at least one invoker's weight>0), select randomly based on totalWeight.
             int offsetWeight = random.nextInt(totalWeight) + 1;
@@ -80,6 +89,7 @@ public class LeastActiveLoadBalance extends AbstractLoadBalance {
                     return invokers.get(leastIndex);
             }
         }
+        // 如果权重相同，则直接随机选一个返回
         // If all invokers have the same weight value or totalWeight=0, return evenly.
         return invokers.get(leastIndexs[random.nextInt(leastCount)]);
     }

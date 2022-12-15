@@ -23,6 +23,9 @@ import com.alibaba.dubbo.rpc.cluster.Directory;
 
 /**
  * mock impl
+ * 通常会应用在以下场景中：服务降级；部分非关键服务全部不可用，希望主流程继续进行；在下游某些节点调用异常时，可以以Mock的结果返回。
+ * Mock只有在拦截到RpcException的时候会启用，属于异常容错方式的一种。业务层面其实也可以用try-catch来实现这种功能，
+ * 如果使用下沉到框架中的Mock机制，则可以让业务的实现更优雅。
  *
  */
 public class MockClusterWrapper implements Cluster {
