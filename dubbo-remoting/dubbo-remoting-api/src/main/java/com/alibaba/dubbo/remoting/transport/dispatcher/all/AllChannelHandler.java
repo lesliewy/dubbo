@@ -38,6 +38,7 @@ public class AllChannelHandler extends WrappedChannelHandler {
 
     @Override
     public void connected(Channel channel) throws RemotingException {
+        /** 线程池在 NettyServer 时初始化. */
         ExecutorService cexecutor = getExecutorService();
         try {
             cexecutor.execute(new ChannelEventRunnable(channel, handler, ChannelState.CONNECTED));

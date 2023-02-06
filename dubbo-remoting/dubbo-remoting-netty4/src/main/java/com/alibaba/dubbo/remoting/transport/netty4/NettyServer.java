@@ -62,6 +62,7 @@ public class NettyServer extends AbstractServer implements Server {
     private EventLoopGroup workerGroup;
 
     public NettyServer(URL url, ChannelHandler handler) throws RemotingException {
+        /** 最终的 WrappedChannelHandler 会实例化线程池， 在接受客户端请求时使用。 例如： AllChannelHandler. */
         super(url, ChannelHandlers.wrap(handler, ExecutorUtil.setThreadName(url, SERVER_THREAD_POOL_NAME)));
     }
 
