@@ -65,6 +65,7 @@ public class HeaderExchangeClient implements ExchangeClient {
         if (heartbeatTimeout < heartbeat * 2) {
             throw new IllegalStateException("heartbeatTimeout < heartbeatInterval * 2");
         }
+        /** 心跳机制. */
         if (needHeartbeat) {
             startHeartbeatTimer();
         }
@@ -182,6 +183,7 @@ public class HeaderExchangeClient implements ExchangeClient {
 
     private void startHeartbeatTimer() {
         stopHeartbeatTimer();
+        /** 显然，因为默认是0,不进行心跳检测. */
         if (heartbeat > 0) {
             heartbeatTimer = scheduled.scheduleWithFixedDelay(
                     new HeartBeatTask(new HeartBeatTask.ChannelProvider() {
