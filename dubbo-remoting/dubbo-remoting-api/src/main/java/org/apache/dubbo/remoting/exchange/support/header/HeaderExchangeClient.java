@@ -192,11 +192,13 @@ public class HeaderExchangeClient implements ExchangeClient {
     }
 
     private void startHeartBeatTask(URL url) {
+        /** 默认是false, 走这里. 但是如果是netty4, return true，不走这里的心跳设置。netty4走的是自己的 netty4/NettyClient.doOpen()中添加的handler IdleStateHandler。*/
         if (!client.canHandleIdle()) {
             AbstractTimerTask.ChannelProvider cp = () -> Collections.singletonList(HeaderExchangeClient.this);
             int heartbeat = getHeartbeat(url);
             long heartbeatTick = calculateLeastDuration(heartbeat);
             HeartbeatTimerTask heartBeatTimerTask = new HeartbeatTimerTask(cp, heartbeatTick, heartbeat);
+            /** 时间轮. */
             heartBeatTimer = IDLE_CHECK_TIMER.get().newTimeout(heartBeatTimerTask, heartbeatTick, TimeUnit.MILLISECONDS);
         }
     }
